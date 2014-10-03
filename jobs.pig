@@ -1,0 +1,16 @@
+REGISTER textanalytics.jar;
+job_input = LOAD 'jobDesc/jobtest.csv' USING PigStorage(',') AS (id, description);
+stop = LOAD 'jobDesc/stopwords-en.txt' USING PigStorage(',') AS (stopword);
+job_words = FOREACH job_input GENERATE id, FLATTEN(TOKENIZE(description)) AS word_raw;
+job_words_lc = FOREACH job_words GENERATE id, LOWER(word_raw) AS word;
+stop_join = JOIN job_words_lc BY word, stop BY stopword USING 'replicated';
+stop_join_clean = FOREACH stop_join GENERATE job_words_lc::id AS id, stop::stopword AS remove;
+job_words_no_stop = JOIN job_words_lc BY (id, word) LEFT OUTER, stop_join_clean BY (id, remove);
+job_no_stop_clean = FOREACH job_words_no_stop GENERATE job_words_lc::id AS id, job_words_lc::word AS word, stop_join_clean::id AS dupID;
+job_stop_removed_step1 = FILTER job_no_stop_clean BY dupID IS NULL;
+job_stop_removed = FOREACH job_stop_removed_step1 GENERATE id, word;
+job_stem = FOREACH job_stop_removed GENERATE id, textanalytics.Stem(word) AS wordStemmed;
+job_spelling = FOREACH job_stem GENERATE id, wordStemmed, textanalytics.Spell(wordStemmed) AS dictWord;
+job_final_group = GROUP job_spelling BY id;
+job_final = FOREACH job_final_group GENERATE group AS id, job_spelling.dictWord AS newDescription;
+STORE job_final INTO 'jobDesc/output' USING PigStorage();
